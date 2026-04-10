@@ -1,8 +1,8 @@
-pip install customtkinter pyodbc bcrypt
 import customtkinter as ctk
 import pyodbc
 import bcrypt
-from tkinter import messagebox
+import pandas as pd
+from tkinter import ttk, messagebox
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -16,6 +16,73 @@ def connect_db():
         'UID=YOUR_USER;'
         'PWD=YOUR_PASSWORD'
     )
+
+# -------- FETCH DATA --------
+def fetch_data():
+    conn = connect_db()
+    query = "SELECT id, name, username, team, created_on, active FROM Users"
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
+
+# -------- EXPORT TO EXCEL --------
+def export_to_excel():
+    df = fetch_data()
+    df.to_excel("users_data.xlsx", index=False)
+    messagebox.showinfo("Success", "Excel file created!")
+
+# -------- SHOW TABLE --------
+def show_table():
+    df = fetch_data()
+
+    table_window = ctk.CTkToplevel()
+    table_window.title("User Data")
+    table_window.geometry("800x400")
+
+    tree = ttk.Treeview(table_window)
+    tree.pack(fill="both", expand=True)
+
+    tree["columns"] = list(df.columns)
+    tree["show"] = "headings"
+
+    for col in df.columns:
+        tree.heading(col, text=col)
+        tree.column(col, width=120)
+
+    for _, row in df.iterrows():
+        tree.insert("", "end", values=list(row))
+
+# -------- DASHBOARD --------
+def open_dashboard(username):
+    dashboard = ctk.CTkToplevel()
+    dashboard.title("Dashboard")
+    dashboard.geometry("400x400")
+
+    ctk.CTkLabel(dashboard, text=f"Welcome {username} 🎉", font=("Arial", 20)).pack(pady=20)
+
+    ctk.CTkButton(dashboard, text="View Users", command=show_table).pack(pady=10)
+    ctk.CTkButton(dashboard, text="Export to Excel", command=export_to_excel).pack(pady=10)
+
+# -------- LOGIN --------
+def login():
+    username = login_user.get()
+    password = login_pass.get()
+
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT password FROM Users WHERE username=?", (username,))
+        result = cursor.fetchone()
+
+        if result and bcrypt.checkpw(password.encode(), result[0]):
+            messagebox.showinfo("Success", "Login Successful 🎉")
+            open_dashboard(username)   # 🔥 OPEN NEW WINDOW
+        else:
+            messagebox.showerror("Error", "Invalid credentials")
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
 
 # -------- REGISTER --------
 def register():
@@ -35,33 +102,13 @@ def register():
         cursor = conn.cursor()
 
         cursor.execute(
-            "INSERT INTO Users (name, username, password, team) VALUES (?, ?, ?, ?)",
-            (name, username, hashed, team)
+            "INSERT INTO Users (name, username, password, team, created_by) VALUES (?, ?, ?, ?, ?)",
+            (name, username, hashed, team, "system")
         )
         conn.commit()
 
         messagebox.showinfo("Success", "Registered Successfully")
         show_login()
-
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
-
-# -------- LOGIN --------
-def login():
-    username = login_user.get()
-    password = login_pass.get()
-
-    try:
-        conn = connect_db()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT password FROM Users WHERE username=?", (username,))
-        result = cursor.fetchone()
-
-        if result and bcrypt.checkpw(password.encode(), result[0]):
-            messagebox.showinfo("Success", "Login Successful 🎉")
-        else:
-            messagebox.showerror("Error", "Invalid credentials")
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
@@ -75,9 +122,9 @@ def show_login():
     register_frame.pack_forget()
     login_frame.pack(expand=True)
 
-# -------- APP WINDOW --------
+# -------- MAIN APP --------
 app = ctk.CTk()
-app.title("Advanced Login System")
+app.title("Login System")
 app.geometry("400x500")
 
 # -------- LOGIN FRAME --------
@@ -116,5 +163,5 @@ reg_team.pack(pady=8)
 ctk.CTkButton(register_frame, text="Register", command=register).pack(pady=15)
 ctk.CTkButton(register_frame, text="Back to Login", command=show_login).pack()
 
-# -------- RUN APP --------
+# -------- RUN --------
 app.mainloop()
