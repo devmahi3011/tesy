@@ -1,526 +1,120 @@
-import pyodbc
-import requests
-import logging
+pip install customtkinter pyodbc bcrypt
 import customtkinter as ctk
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-from tkcalendar import DateEntry
-from datetime import datetime
-import threading
-import pandas as pd
-import hashlib
-
-logging.basicConfig(level=logging.INFO)
-
-AIOT03_DEV = "[dsdsdsa](https://DSDSDSA)"
-POOL_OPTIONS = ["MI", "MI_SQ_SBL5WSI1", "MI_SQ_SUALATA1"]
+import pyodbc
+import bcrypt
+from tkinter import messagebox
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+# -------- DB CONNECTION --------
+def connect_db():
+    return pyodbc.connect(
+        'DRIVER={ODBC Driver 17 for SQL Server};'
+        'SERVER=YOUR_SERVER;'
+        'DATABASE=UserDB;'
+        'UID=YOUR_USER;'
+        'PWD=YOUR_PASSWORD'
+    )
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+# -------- REGISTER --------
+def register():
+    name = reg_name.get()
+    username = reg_user.get()
+    password = reg_pass.get()
+    team = reg_team.get()
 
+    if not (name and username and password and team):
+        messagebox.showerror("Error", "All fields required")
+        return
 
-class LoginWindow:
-    def __init__(self):
-        self.root = ctk.CTk()
-        self.root.title("Login")
-        self.root.geometry("300x200")
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 
-        ctk.CTkLabel(self.root, text="Username").pack(pady=5)
-        self.username = ctk.CTkEntry(self.root)
-        self.username.pack(pady=5)
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
 
-        ctk.CTkLabel(self.root, text="Password").pack(pady=5)
-        self.password = ctk.CTkEntry(self.root, show="*")
-        self.password.pack(pady=5)
-
-        ctk.CTkButton(self.root, text="Login", command=self.login).pack(pady=15)
-
-    def login(self):
-        user = self.username.get()
-        pwd = self.password.get()
-        hashed_pwd = hash_password(pwd)
-
-        try:
-            conn = pyodbc.connect(
-                "DRIVER={SQL Server};"
-                "SERVER=TSTSERVER;"
-                "DATABASE=DBTST;"
-                "Trusted_Connection=yes;"
-            )
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM Users WHERE username=? AND password=?",
-                (user, hashed_pwd)
-            )
-            result = cursor.fetchone()
-            conn.close()
-
-            if result:
-                self.root.destroy()
-                main = ctk.CTk()
-                app = AIOTApp(main)
-                main.mainloop()
-            else:
-                messagebox.showerror("Error", "Invalid login")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Database error: {e}")
-
-    def run(self):
-        self.root.mainloop()
-
-
-class AIOTApp:
-
-    def __init__(self, root):
-        self.root = root
-        self.root.title("AIOT03 Failed Reprocesser")
-        self.root.geometry("1200x750")
-
-        self.selected_fg = None
-
-        # Configure grid weights for resizing
-        self.root.grid_rowconfigure(1, weight=1)
-        self.root.grid_rowconfigure(3, weight=1)
-        self.root.grid_columnconfigure(0, weight=1)
-
-        # ================= FILTER FRAME =================
-        filter_frame = ctk.CTkFrame(root)
-        filter_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-
-        ctk.CTkLabel(filter_frame, text="FILTER & SEARCH", font=("Arial", 16, "bold")).grid(
-            row=0, column=0, columnspan=6, pady=5
+        cursor.execute(
+            "INSERT INTO Users (name, username, password, team) VALUES (?, ?, ?, ?)",
+            (name, username, hashed, team)
         )
+        conn.commit()
 
-        # From Date
-        ctk.CTkLabel(filter_frame, text="From Date").grid(row=1, column=0, padx=5, pady=5)
-        self.from_date = DateEntry(filter_frame, width=12, date_pattern="yyyy-mm-dd")
-        self.from_date.grid(row=1, column=1, padx=5, pady=5)
+        messagebox.showinfo("Success", "Registered Successfully")
+        show_login()
 
-        # To Date
-        ctk.CTkLabel(filter_frame, text="To Date").grid(row=1, column=2, padx=5, pady=5)
-        self.to_date = DateEntry(filter_frame, width=12, date_pattern="yyyy-mm-dd")
-        self.to_date.grid(row=1, column=3, padx=5, pady=5)
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
 
-        # Pool Dropdown
-        ctk.CTkLabel(filter_frame, text="Pool").grid(row=2, column=0, padx=5, pady=5)
-        self.pool_var = tk.StringVar()
-        self.pool_dropdown = ctk.CTkComboBox(
-            filter_frame,
-            variable=self.pool_var,
-            values=POOL_OPTIONS,
-            command=self.on_pool_change  # CTkComboBox uses 'command', not bind
-        )
-        self.pool_dropdown.grid(row=2, column=1, padx=5, pady=5)
-        self.pool_dropdown.set(POOL_OPTIONS[0])
+# -------- LOGIN --------
+def login():
+    username = login_user.get()
+    password = login_pass.get()
 
-        # Sync Queue
-        ctk.CTkLabel(filter_frame, text="Synchronization Queue").grid(row=2, column=2, padx=5, pady=5)
-        self.sync_queue_var = tk.StringVar()
-        self.sync_queue_dropdown = ctk.CTkComboBox(
-            filter_frame,
-            variable=self.sync_queue_var,
-            values=[]
-        )
-        self.sync_queue_dropdown.grid(row=2, column=3, padx=5, pady=5)
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
 
-        # Search Button
-        self.search_btn = ctk.CTkButton(
-            filter_frame,
-            text="Search",
-            command=self.run_process
-        )
-        self.search_btn.grid(row=1, column=4, rowspan=2, padx=10, pady=5)
+        cursor.execute("SELECT password FROM Users WHERE username=?", (username,))
+        result = cursor.fetchone()
 
-        # ================= FAILED LIST FRAME =================
-        failed_frame = ctk.CTkFrame(root)
-        failed_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
-
-        ctk.CTkLabel(
-            failed_frame,
-            text="FAILED FGSN LIST",
-            font=("Arial", 16, "bold")
-        ).pack(pady=5)
-
-        columns = ("serial_number", "fail_datetime", "reason")
-        self.tree = ttk.Treeview(
-            failed_frame,
-            columns=columns,
-            show="headings",
-            selectmode="browse"
-        )
-
-        self.tree.heading("serial_number", text="SERIAL NUMBER")
-        self.tree.heading("fail_datetime", text="FAIL DATE/TIME")
-        self.tree.heading("reason", text="REASON")
-
-        self.tree.column("serial_number", width=200, anchor="center")
-        self.tree.column("fail_datetime", width=150, anchor="center")
-        self.tree.column("reason", width=300, anchor="w")
-
-        vsb = ttk.Scrollbar(failed_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-
-        self.tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
-
-        self.tree.bind("<<TreeviewSelect>>", self.on_row_select)
-
-        # ================= ACTION FRAME =================
-        action_frame = ctk.CTkFrame(root)
-        action_frame.grid(row=1, column=1, sticky="ns", padx=5, pady=5)
-
-        self.reprocess_selected_btn = ctk.CTkButton(
-            action_frame,
-            text="Reprocess Selected",
-            command=self.reprocess_selected,
-            state="disabled"
-        )
-        self.reprocess_selected_btn.pack(padx=5, pady=5)
-
-        self.reprocess_all_btn = ctk.CTkButton(
-            action_frame,
-            text="Reprocess All",
-            command=self.reprocess_all
-        )
-        self.reprocess_all_btn.pack(padx=5, pady=5)
-
-        ctk.CTkButton(
-            action_frame,
-            text="Export To Excel",
-            command=self.export_excel
-        ).pack(padx=5, pady=10)
-
-        # ================= LOG FRAME =================
-        logs_frame = ctk.CTkFrame(root)
-        logs_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-
-        ctk.CTkLabel(
-            logs_frame,
-            text="PROCESSING LOGS & RESULTS",
-            font=("Arial", 16, "bold")
-        ).pack(pady=5)
-
-        self.output = scrolledtext.ScrolledText(logs_frame, width=100, height=15)
-        self.output.pack(fill="both", expand=True, padx=5, pady=5)
-
-        self.output.tag_config("success", foreground="green")
-        self.output.tag_config("error", foreground="red")
-        self.output.tag_config("serial", foreground="blue")
-        self.output.tag_config("info", foreground="black")
-
-        # ================= ORDER TREE =================
-        order_frame = ctk.CTkFrame(root)
-        order_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
-
-        order_columns = ("order_no", "serial_number", "fail_datetime", "reason", "reprocess_time")
-        self.order_tree = ttk.Treeview(order_frame, columns=order_columns, show="headings")
-
-        for col in order_columns:
-            self.order_tree.heading(col, text=col.upper().replace("_", " "))
-
-        self.order_tree.pack(fill="both", expand=True)
-
-        # ================= INIT EVENTS =================
-        self.from_date.bind("<<DateEntrySelected>>", lambda e: self.load_sync_queue_options())
-        self.to_date.bind("<<DateEntrySelected>>", lambda e: self.load_sync_queue_options())
-
-        # Initial load
-        self.load_sync_queue_options()
-
-    def on_pool_change(self, choice):
-        """Called when pool dropdown changes"""
-        self.load_sync_queue_options()
-
-    def log(self, message, tag="info"):
-        self.output.insert(tk.END, str(message) + "\n", tag)
-        self.output.see(tk.END)
-        self.root.update()
-
-    def load_sync_queue_options(self):
-        pool = self.pool_var.get()
-        from_datetime = f"{self.from_date.get_date().strftime('%Y-%m-%d')} 00:00:00"
-        to_datetime = f"{self.to_date.get_date().strftime('%Y-%m-%d')} 23:59:59"
-
-        conn = None
-        cursor = None
-        try:
-            conn = pyodbc.connect(
-                "DRIVER={SQL Server};"
-                "SERVER=TSTSERVER;"
-                "DATABASE=DBTST;"
-                "Trusted_Connection=yes;"
-            )
-            cursor = conn.cursor()
-
-            with open("PROD_SQ.sql", "r") as file:
-                query = file.read()
-
-            cursor.execute(query, (pool, from_datetime, to_datetime))
-            sync_groups = [row[0] for row in cursor.fetchall()]
-
-            if not sync_groups:
-                sync_groups = ["No Data Found"]
-
-            self.sync_queue_dropdown.configure(values=sync_groups)
-            self.sync_queue_dropdown.set(sync_groups[0])
-
-        except Exception as e:
-            self.log(f"Failed to load Sync Queue options: {e}", "error")
-            self.sync_queue_dropdown.configure(values=["Error Loading Data"])
-            self.sync_queue_dropdown.set("Error Loading Data")
-
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-
-    def run_process(self):
-        pool = self.pool_var.get()
-        sync_queue_pattern = f"%{self.sync_queue_var.get()}%"
-        from_datetime = f"{self.from_date.get_date().strftime('%Y-%m-%d')} 00:00:00"
-        to_datetime = f"{self.to_date.get_date().strftime('%Y-%m-%d')} 23:59:59"
-
-        # Clear previous
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-        self.reprocess_selected_btn.configure(state="disabled")
-        self.selected_fg = None
-        self.log("Running search...", "info")
-
-        conn = None
-        cursor = None
-        try:
-            conn = pyodbc.connect(
-                "DRIVER={SQL Server};"
-                "SERVER=TSTSERVER;"
-                "DATABASE=DBTST;"
-                "Trusted_Connection=yes;"
-            )
-            cursor = conn.cursor()
-
-            with open("FailedFG.sql", "r") as f:
-                query = f.read()
-
-            cursor.execute(query, (pool, sync_queue_pattern, from_datetime, to_datetime))
-            rows = cursor.fetchall()
-
-            if not rows:
-                self.log("No failed FG Serial Numbers found.", "error")
-                return
-
-            for row in rows:
-                serial_number = row.FGSerialNumber if hasattr(row, "FGSerialNumber") else row[1]
-                fail_datetime = row.FinishedOn if hasattr(row, "FinishedOn") else row[0]
-                reason = row.Info if hasattr(row, "Info") else row[2]
-
-                if fail_datetime:
-                    fail_datetime = fail_datetime.strftime("%Y-%m-%d %H:%M:%S")
-
-                self.tree.insert("", "end", values=(serial_number, fail_datetime, reason))
-
-            self.log(f"Loaded {len(rows)} records.", "info")
-
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            self.log(f"Error: {e}", "error")
-
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-
-    def on_row_select(self, event):
-        selected = self.tree.selection()
-        if selected:
-            self.selected_fg = self.tree.item(selected[0])["values"][0]
-            self.log(f"Selected: {self.selected_fg}", "serial")
-            self.reprocess_selected_btn.configure(state="normal")
+        if result and bcrypt.checkpw(password.encode(), result[0]):
+            messagebox.showinfo("Success", "Login Successful 🎉")
         else:
-            self.selected_fg = None
-            self.reprocess_selected_btn.configure(state="disabled")
+            messagebox.showerror("Error", "Invalid credentials")
 
-    def process_fg(self, FGSerialNumber, cursor, session):
-        pool = self.pool_var.get()
-        sync_queue_pattern = f"%{self.sync_queue_var.get()}%"
-        from_datetime = f"{self.from_date.get_date().strftime('%Y-%m-%d')} 00:00:00"
-        to_datetime = f"{self.to_date.get_date().strftime('%Y-%m-%d')} 23:59:59"
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
 
-        if not FGSerialNumber:
-            self.log("Invalid Serial Number selected.", "error")
-            return
+# -------- SWITCH SCREENS --------
+def show_register():
+    login_frame.pack_forget()
+    register_frame.pack(expand=True)
 
-        self.log(f"Processing: {FGSerialNumber}", "serial")
+def show_login():
+    register_frame.pack_forget()
+    login_frame.pack(expand=True)
 
-        try:
-            with open("AIOT03TSTT.sql", "r") as f:
-                query = f.read()
+# -------- APP WINDOW --------
+app = ctk.CTk()
+app.title("Advanced Login System")
+app.geometry("400x500")
 
-            cursor.execute(query, (
-                pool,
-                sync_queue_pattern,
-                from_datetime,
-                to_datetime,
-                FGSerialNumber
-            ))
+# -------- LOGIN FRAME --------
+login_frame = ctk.CTkFrame(app)
 
-            rows = cursor.fetchall()
+ctk.CTkLabel(login_frame, text="Login", font=("Arial", 24)).pack(pady=20)
 
-            if not rows:
-                self.log(f"No data found for Serial Number: {FGSerialNumber}", "error")
-                return
+login_user = ctk.CTkEntry(login_frame, placeholder_text="Username")
+login_user.pack(pady=10)
 
-            for row in rows:
-                msg = row[0]
-                payload = {
-                    "Inputs": {"IncomingMessage": msg},
-                    "ExecutionMode": 1,
-                    "Retries": 1,
-                    "SleepTime": 100,
-                    "SynchronousQueue": "",
-                    "Timeout": 100
-                }
+login_pass = ctk.CTkEntry(login_frame, placeholder_text="Password", show="*")
+login_pass.pack(pady=10)
 
-                try:
-                    response = session.post(
-                        AIOT03_DEV,
-                        json=payload,
-                        verify=False,
-                        timeout=30
-                    )
+ctk.CTkButton(login_frame, text="Login", command=login).pack(pady=15)
+ctk.CTkButton(login_frame, text="Create Account", command=show_register).pack()
 
-                    if response.status_code in (200, 201):
-                        self.log(f"{FGSerialNumber} → POST Success", "success")
-                        try:
-                            self.log(f"Response: {response.json()}", "info")
-                        except Exception:
-                            self.log(f"Response Text: {response.text}", "info")
-                    else:
-                        self.log(f"{FGSerialNumber} → POST Failed: {response.status_code}", "error")
+login_frame.pack(expand=True)
 
-                except requests.exceptions.RequestException as req_err:
-                    self.log(f"{FGSerialNumber} → Request Error: {req_err}", "error")
+# -------- REGISTER FRAME --------
+register_frame = ctk.CTkFrame(app)
 
-        except Exception as e:
-            self.log(f"Error processing {FGSerialNumber}: {e}", "error")
+ctk.CTkLabel(register_frame, text="Register", font=("Arial", 24)).pack(pady=20)
 
-    def reprocess_selected(self):
-        if not self.selected_fg:
-            messagebox.showwarning("Warning", "Select a Serial Number first")
-            return
+reg_name = ctk.CTkEntry(register_frame, placeholder_text="Full Name")
+reg_name.pack(pady=8)
 
-        conn = None
-        cursor = None
-        session = None
-        try:
-            conn = pyodbc.connect(
-                "DRIVER={SQL Server};"
-                "SERVER=TSTSERVER;"
-                "DATABASE=DBTST;"
-                "Trusted_Connection=yes;"
-            )
-            cursor = conn.cursor()
-            session = requests.Session()
+reg_user = ctk.CTkEntry(register_frame, placeholder_text="Username")
+reg_user.pack(pady=8)
 
-            self.process_fg(self.selected_fg, cursor, session)
+reg_pass = ctk.CTkEntry(register_frame, placeholder_text="Password", show="*")
+reg_pass.pack(pady=8)
 
-        except Exception as e:
-            self.log(f"Error: {e}", "error")
+reg_team = ctk.CTkEntry(register_frame, placeholder_text="Team")
+reg_team.pack(pady=8)
 
-        finally:
-            if session:
-                session.close()
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-            self.log("Reprocess completed.", "info")
+ctk.CTkButton(register_frame, text="Register", command=register).pack(pady=15)
+ctk.CTkButton(register_frame, text="Back to Login", command=show_login).pack()
 
-    def reprocess_all(self):
-        items = self.tree.get_children()
-        if not items:
-            messagebox.showwarning("Warning", "No Serial Numbers to process")
-            return
-
-        self.log("Starting Reprocess All...", "info")
-
-        conn = None
-        cursor = None
-        session = None
-        try:
-            conn = pyodbc.connect(
-                "DRIVER={SQL Server};"
-                "SERVER=TSTSERVER;"
-                "DATABASE=DBTST;"
-                "Trusted_Connection=yes;"
-            )
-            cursor = conn.cursor()
-            session = requests.Session()
-
-            for item in items:
-                fg_serial = self.tree.item(item)["values"][0]
-                self.tree.selection_set(item)
-                self.tree.focus(item)
-                self.root.update()
-
-                self.process_fg(fg_serial, cursor, session)
-
-        except Exception as e:
-            self.log(f"Error: {e}", "error")
-
-        finally:
-            if session:
-                session.close()
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-
-        self.log("All Serial Numbers processed.", "success")
-
-    def export_excel(self):
-        """Export the failed list to Excel"""
-        items = self.tree.get_children()
-        if not items:
-            messagebox.showwarning("Warning", "No data to export")
-            return
-
-        data = []
-        for item in items:
-            values = self.tree.item(item)["values"]
-            data.append({
-                "Serial Number": values[0],
-                "Fail DateTime": values[1],
-                "Reason": values[2]
-            })
-
-        df = pd.DataFrame(data)
-
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"failed_fg_export_{timestamp}.xlsx"
-
-        try:
-            df.to_excel(filename, index=False)
-            self.log(f"Exported to {filename}", "success")
-            messagebox.showinfo("Success", f"Data exported to {filename}")
-        except Exception as e:
-            self.log(f"Export failed: {e}", "error")
-            messagebox.showerror("Error", f"Export failed: {e}")
-
-
-if __name__ == "__main__":
-    # Option 1: Start with login
-    # login_app = LoginWindow()
-    # login_app.run()
-
-    # Option 2: Skip login (for testing)
-    root = ctk.CTk()
-    app = AIOTApp(root)
-    root.mainloop()
+# -------- RUN APP --------
+app.mainloop()
